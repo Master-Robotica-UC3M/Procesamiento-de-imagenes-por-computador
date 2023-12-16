@@ -4,26 +4,29 @@ import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import Dataset, DataLoader
+import torchmetrics
 
 from PIL import Image
 import matplotlib.pyplot as plt
 import numpy as np
-import math
 import pandas as pd
-from sklearn import datasets
-from sklearn.preprocessing import LabelEncoder
+import cv2
 
 import os
 
 # Device configuration
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+############################################################################
+############################ CREAR EL DATASET ##############################
+############################################################################
+
 class CustomDataset(Dataset):
-    def __init__(self, csv_file, root_dir, transform=None):
+    def __init__(self, csv_file, root_dir, class_names, transform=None):
         self.data = pd.read_csv(csv_file)
         self.root_dir = root_dir
         self.transform = transform
-        self.label_map = self.create_label_map()
+        self.class_names = class_names
 
     def __len__(self):
         return len(self.data)
@@ -32,34 +35,29 @@ class CustomDataset(Dataset):
         img_name = os.path.join(self.root_dir, self.data.iloc[idx, 0])
         image = Image.open(img_name)
         label = self.data.iloc[idx, 3]  # Assuming labels are in the 4th column
-        label = self.label_map[label]   # Convert label from string to numeric value
-        label_tensor = torch.tensor(label, dtype=torch.long)  # Convert label to tensor
+        label = self.class_names.index(label)   # Convert label from string to numeric value
+        label = torch.tensor(label, dtype=torch.long)  # Convert label to tensor
 
         if self.transform:
             image = self.transform(image)
 
-        return image, label_tensor
+        return image, label
 
-    def create_label_map(self):
-        unique_labels = self.data.iloc[:, 3].unique()  # Get unique labels from the column
-        label_map = {label: idx for idx, label in enumerate(unique_labels)}
-        return label_map
 
 #Classes
-class_names = ('crab', 'fox', 'elephant', 'bird', 'dog', 'swan')
+class_names = ('crab-shadow', 'fox-shadow', 'elephant-shadow', 'bird-shadow', 'dog-shadow', 'swan-shadow')
 
 # Define transformations (if needed)
 transform = transforms.Compose([
-    transforms.ToTensor(),  # Convert images to PyTorch tensors
-    # Add more transformations as needed (e.g., normalization)
+    transforms.ToTensor()
 ])
 
 # Path to your CSV file and image folder
-csv_path = '/content/gdrive/MyDrive/Colab Notebooks/data/data/_annotations.csv'
-image_folder = '/content/gdrive/MyDrive/Colab Notebooks/data/data/'  # Updated image folder path
+csv_path = '/home/gonecho/Documents/MasterRobotica/PIC_TrabajoFinal/ShadowPlay/data/_annotations.csv'
+image_folder = '/home/gonecho/Documents/MasterRobotica/PIC_TrabajoFinal/ShadowPlay/data'  # Updated image folder path
 
 # Create an instance of your custom dataset
-custom_dataset = CustomDataset(csv_file=csv_path, root_dir=image_folder, transform=transform)
+custom_dataset = CustomDataset(csv_file=csv_path, root_dir=image_folder, class_names=class_names, transform=transform)
 
 # Define the sizes for training and test sets
 train_size = 40
@@ -73,6 +71,11 @@ batch_size = 1
 # Create data loaders for training and test sets
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=batch_size, shuffle=False)
+
+
+############################################################################
+############################ VISUALIZAR DATOS ##############################
+############################################################################
 
 
 # Obtener la primera imagen y etiqueta del conjunto de entrenamiento
@@ -90,7 +93,7 @@ def imshow(image, title):
     plt.axis('off')
     plt.show()
 
-print(train_label)
+
 
 # Obtener la etiqueta/clase correspondiente
 train_class = train_label[0].item()  # Suponiendo que la etiqueta es un tensor de longitud 1
@@ -98,11 +101,16 @@ test_class = test_label[0].item()    # Suponiendo que la etiqueta es un tensor d
 
 # Mostrar la primera imagen del conjunto de entrenamiento y prueba con su título
 print("Primera imagen del conjunto de entrenamiento:")
-imshow(train_image[0], f"Clase: {train_class}")
+imshow(train_image[0], f"Clase: {class_names[train_class]}")
 
 print("Primera imagen del conjunto de prueba:")
-imshow(test_image[0], f"Clase: {test_class}")
+imshow(test_image[0], f"Clase: {class_names[test_class]}")
 
+
+
+############################################################################
+############################ DEFINIR LA RED ################################
+############################################################################
 
 class ConvNet(nn.Module):
     def __init__(self):
@@ -125,35 +133,52 @@ class ConvNet(nn.Module):
         return x
     
 
+############################################################################
+############################ ENTRENAR LA RED ###############################
+############################################################################
+
 # Hyper-parameters
-num_epochs = 50
-batch_size = 1
+num_epochs = 2
 learning_rate = 0.01
 
-
-# get some random training images
-dataiter = iter(train_loader)
-images, labels = next(dataiter)
-
-# show images
-def imshow(img):
-    # img = img / 2 + 0.5  # unnormalize
-    npimg = img.numpy()
-    plt.imshow(np.transpose(npimg, (1, 2, 0)))
-    plt.show()
-
-imshow(torchvision.utils.make_grid(images))
 
 model = ConvNet().to(device)
 
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
+loss_fn = criterion
+num_outputs = 6
+metrics_fn = torchmetrics.classification.MulticlassAccuracy(num_classes=num_outputs, average='micro').to(device)
+
+def test(model, dataloader, loss_fn, metrics_fn):
+   
+    device = next(model.parameters()).device
+    model.eval()
+    metrics_fn = metrics_fn.to(device)
+    metrics_fn.reset()
+    with torch.no_grad():
+        loss = 0
+        for x, y in dataloader:
+            x, y = x.to(device), y.to(device)
+            y_pred = model(x)
+            loss += loss_fn(y_pred, y).item() * x.size(0)
+            metrics_fn(y_pred, y)
+        
+        loss = loss / len(dataloader.dataset)
+        metrics = metrics_fn.compute()
+
+    return loss, metrics
 
 n_total_steps = len(train_loader)
+
+best_acc = 0
+train_loss_history = []
+train_acc_history = []
+test_loss_history = []
+test_acc_history = []
+
 for epoch in range(num_epochs):
     for i, (images, labels) in enumerate(train_loader):
-        # origin shape: [4, 3, 32, 32] = 4, 3, 1024
-        # input_layer: 3 input channels, 6 output channels, 5 kernel size
         images = images.to(device)
         labels = labels.to(device)
 
@@ -166,40 +191,91 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
-        if (i+1) % 1 == 0:
-            print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
+        # if (i+1) % 1 == 0:
+        #     print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
+
+    
+
+    # Evaluate the model after each epoch
+    train_loss, train_metrics = test(model, train_loader, loss_fn, metrics_fn)
+    test_loss, test_metrics = test(model, test_loader, loss_fn, metrics_fn)
+
+    if best_acc <= train_metrics:
+        best_acc = train_metrics
+        torch.save(model.state_dict(), f'best_model.pth')
+
+    # Almacenamos los valores de pérdida y precisión en cada epoch
+    train_loss_history.append(train_loss)
+    train_acc_history.append(train_metrics)
+    test_loss_history.append(test_loss)
+    test_acc_history.append(test_metrics)
+
+    print(f'Epoch {epoch}, Precisión (train): {train_metrics:.4f}, Loss (train): {train_loss:.4f}')
+    print(f'Epoch {epoch}, Precisión (test):  {test_metrics:.4f}, Loss (test):  {test_loss:.4f}')
 
 print('Finished Training')
+
 PATH = './cnn.pth'
 torch.save(model.state_dict(), PATH)
 
+
+# Convertir listas a arrays de numpy para plotear
+epochs = np.arange(1, num_epochs + 1)
+test_loss_values = np.array(test_loss_history)
+test_acc_values = np.array(test_acc_history)
+
+# Gráfica para mostrar cómo evoluciona el loss con las epochs
+plt.figure(figsize=(10, 5))
+plt.plot(epochs, test_loss_values, label='Test Loss', color='red')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.title('Test Loss vs Epochs')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Gráfica para mostrar cómo evoluciona la precisión con las epochs
+plt.figure(figsize=(10, 5))
+plt.plot(epochs, test_acc_values, label='Test Accuracy', color='blue')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy')
+plt.title('Test Accuracy vs Epochs')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+
+# Carga la imagen
+image_path = 'test.jpeg'
+image = Image.open(image_path)
+
+# Transforma la imagen para que tenga el mismo formato que las imágenes con las que entrenaste tu modelo
+transform = transforms.Compose([
+    transforms.Resize((416, 416)),  # Asegúrate de redimensionarla a las dimensiones que acepta tu modelo
+    transforms.ToTensor(),
+])
+
+# Aplica las transformaciones a la imagen
+image = transform(image).unsqueeze(0)  # Añade una dimensión adicional para el batch
+
+# Pasa la imagen por el modelo
 with torch.no_grad():
-    n_correct = 0
-    n_samples = 0
-    n_class_correct = [0 for i in range(6)]
-    n_class_samples = [0 for i in range(6)]
-    for images, labels in test_loader:
-        images = images.to(device)
-        labels = labels.to(device)
+    outputs = model(image)
 
-        outputs = model(images)
-        # max returns (value ,index)
-        _, predicted = torch.max(outputs, 1)
-        n_samples += labels.size(0)
-        n_correct += (predicted == labels).sum().item()
 
-        for i in range(batch_size):
-            label = labels[i]
-            pred = predicted[i]
-            if (label == pred):
-                n_class_correct[label] += 1
-            n_class_samples[label] += 1
+# Obtén las probabilidades usando softmax
+probabilities = F.softmax(outputs, dim=1)
 
-    print(n_class_samples)
-    acc = 100.0 * n_correct / n_samples
-    print(f'Accuracy of the network: {acc} %')
+# Obtén la clase predicha y su probabilidad asociada
+predicted_prob, predicted_class = torch.max(probabilities, 1)
+predicted_class = predicted_class.item()
+predicted_prob = predicted_prob.item()
 
-    for i in range(6):
-      if n_class_samples[i] > 0:
-        acc = 100.0 * n_class_correct[i] / n_class_samples[i]
-        print(f'Accuracy of {class_names[i]}: {acc} %')
+print("Clase predicha:", class_names[predicted_class])
+
+test_image = Image.open('test.jpeg')
+test_image = test_image.resize((416,416))
+test_image = transform(test_image)
+imshow(test_image, f"Predicted class: {class_names[predicted_class]}. Accuracy: {predicted_prob:.3f}")
+
+
