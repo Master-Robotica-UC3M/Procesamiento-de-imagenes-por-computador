@@ -34,7 +34,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, idx):
         img_name = os.path.join(self.root_dir, self.data.iloc[idx, 0])
         image = Image.open(img_name)
-        label = self.data.iloc[idx, 3]  # Assuming labels are in the 4th column
+        label = self.data.iloc[idx, 1]  # Assuming labels are in the 2nd column
         label = self.class_names.index(label)   # Convert label from string to numeric value
         label = torch.tensor(label, dtype=torch.long)  # Convert label to tensor
 
@@ -45,23 +45,26 @@ class CustomDataset(Dataset):
 
 
 #Classes
-class_names = ('crab-shadow', 'fox-shadow', 'elephant-shadow', 'bird-shadow', 'dog-shadow', 'swan-shadow')
+# class_names = ('crab-shadow', 'fox-shadow', 'elephant-shadow', 'bird-shadow', 'dog-shadow', 'swan-shadow')
+class_names = ('fox-shadow', 'elephant-shadow', 'bird-shadow', 'dog-shadow', 'swan-shadow')
 
 # Define transformations (if needed)
 transform = transforms.Compose([
+    transforms.Resize((416, 416)),
     transforms.ToTensor()
 ])
 
 # Path to your CSV file and image folder
-csv_path = '/home/gonecho/Documents/MasterRobotica/PIC_TrabajoFinal/ShadowPlay/data/_annotations.csv'
-image_folder = '/home/gonecho/Documents/MasterRobotica/PIC_TrabajoFinal/ShadowPlay/data'  # Updated image folder path
+csv_path = '../data/dataset/annotations.csv'
+image_folder = '../data/dataset'  # Updated image folder path
 
 # Create an instance of your custom dataset
 custom_dataset = CustomDataset(csv_file=csv_path, root_dir=image_folder, class_names=class_names, transform=transform)
 
 # Define the sizes for training and test sets
-train_size = 40
-test_size = 10
+total_size = len(custom_dataset)
+train_size = round(total_size*0.8)
+test_size = total_size - train_size
 
 # Split the dataset into training and test sets
 train_set, test_set = torch.utils.data.random_split(custom_dataset, [train_size, test_size])
@@ -120,7 +123,7 @@ class ConvNet(nn.Module):
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(16 * 101 * 101, 120)
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, 6)
+        self.fc3 = nn.Linear(84, 5)
 
     def forward(self, x):
         # -> n, 3, 416, 416
@@ -138,7 +141,7 @@ class ConvNet(nn.Module):
 ############################################################################
 
 # Hyper-parameters
-num_epochs = 2
+num_epochs = 10
 learning_rate = 0.01
 
 
@@ -147,7 +150,7 @@ model = ConvNet().to(device)
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
 loss_fn = criterion
-num_outputs = 6
+num_outputs = 5
 metrics_fn = torchmetrics.classification.MulticlassAccuracy(num_classes=num_outputs, average='micro').to(device)
 
 def test(model, dataloader, loss_fn, metrics_fn):
@@ -177,6 +180,8 @@ train_acc_history = []
 test_loss_history = []
 test_acc_history = []
 
+print("Todo listo jefe!")
+
 for epoch in range(num_epochs):
     for i, (images, labels) in enumerate(train_loader):
         images = images.to(device)
@@ -191,8 +196,8 @@ for epoch in range(num_epochs):
         loss.backward()
         optimizer.step()
 
-        # if (i+1) % 1 == 0:
-        #     print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
+        if (i+1) % 1 == 0:
+            print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
 
     
 
