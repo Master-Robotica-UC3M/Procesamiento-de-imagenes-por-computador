@@ -69,7 +69,7 @@ test_size = total_size - train_size
 # Split the dataset into training and test sets
 train_set, test_set = torch.utils.data.random_split(custom_dataset, [train_size, test_size])
 
-batch_size = 1
+batch_size = 2
 
 # Create data loaders for training and test sets
 train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
@@ -133,6 +133,7 @@ class ConvNet(nn.Module):
         x = F.relu(self.fc1(x))               # -> n, 120
         x = F.relu(self.fc2(x))               # -> n, 84
         x = self.fc3(x)                       # -> n, 6
+        x = F.softmax(x, dim=-1)
         return x
     
 
@@ -140,18 +141,18 @@ class ConvNet(nn.Module):
 ############################ ENTRENAR LA RED ###############################
 ############################################################################
 
-# Hyper-parameters
-num_epochs = 10
-learning_rate = 0.01
+def train(model, dataloader, loss_fn, optimizer):
+    device = next(model.parameters()).device
+    model.train()
+    for i, (x, y) in enumerate(dataloader):
+        print("Llevo: ", i, "/", len(dataloader))
+        x, y = x.to(device), y.to(device)
+        optimizer.zero_grad()
+        y_pred = model(x)
+        loss = loss_fn(torch.log(y_pred), y)
+        loss.backward()
+        optimizer.step()
 
-
-model = ConvNet().to(device)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate)
-loss_fn = criterion
-num_outputs = 5
-metrics_fn = torchmetrics.classification.MulticlassAccuracy(num_classes=num_outputs, average='micro').to(device)
 
 def test(model, dataloader, loss_fn, metrics_fn):
    
@@ -172,6 +173,20 @@ def test(model, dataloader, loss_fn, metrics_fn):
 
     return loss, metrics
 
+
+# Hyper-parameters
+num_epochs = 10
+learning_rate = 0.01
+num_outputs = 5
+
+model = ConvNet().to(device)
+
+loss_fn = nn.CrossEntropyLoss()
+metrics_fn = torchmetrics.classification.MulticlassAccuracy(num_classes=num_outputs, average='micro').to(device)
+optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+
+
 n_total_steps = len(train_loader)
 
 best_acc = 0
@@ -183,22 +198,8 @@ test_acc_history = []
 print("Todo listo jefe!")
 
 for epoch in range(num_epochs):
-    for i, (images, labels) in enumerate(train_loader):
-        images = images.to(device)
-        labels = labels.to(device)
-
-        # Forward pass
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-
-        # Backward and optimize
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if (i+1) % 1 == 0:
-            print (f'Epoch [{epoch+1}/{num_epochs}], Step [{i+1}/{n_total_steps}], Loss: {loss.item():.4f}')
-
+    # Train the model
+    train(model, train_loader, loss_fn, optimizer)
     
 
     # Evaluate the model after each epoch
