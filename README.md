@@ -1,4 +1,4 @@
-# Procesamiento-de-imagenes-por-computador
+# ShadowPlay en Google Colab
 Este repositorio sirve para mostrar el trabajo final de la asignatura
 
 Prueba el programa ShadowPlay en Google Colab! <strong>(Acceso restringido a cuentas UC3M)</strong>:
