@@ -7,6 +7,8 @@ Prueba el programa ShadowPlay en Google Colab!:
   <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Open In Colab"/>
 </a>
 
+## Dataset Augmentation library:
+
 Este enlace contiene la instalación de Albumentations para el dataset augmentations:
 https://albumentations.ai/docs/getting_started/installation/
 
